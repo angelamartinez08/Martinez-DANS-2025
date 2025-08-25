@@ -1,0 +1,94 @@
+---
+title: "WHOQOLBREF LEARNING"
+output: html_document
+date: "2025-08-13"
+---
+FIRST THINGS FIRST :P
+```{r}
+setwd("/Volumes/Hera/Angela")
+load('/Volumes/Hera/Projects/7TBrainMech/scripts/behave/svys.RData')
+library(dplyr)
+```
+RANDOM LOL REVISIT no need to look now
+```{r}
+Y2HF <- svys[["7T Y2 Hybrid Female Survey Battery"]] #EXTRACTING IT INTO DATAFRAME
+
+all_csv <- Sys.glob('/Volumes/L/bea_res/Data/Temporary Raw Data/7T/*/*_selfreport.csv') #finding where all those files are, the * is a placeholder(glob placeholder)
+
+```
+
+IN DIFFERENT BATTERIES THE WHOQOL QUESTIONS WILL BE IN A DIFFERENT POSITION SVY BATTERIES
+
+LOOK FOR WHOQOL ITEMS!!!
+note: this is how we can look for specific items that we want to work within the data! 
+```{r}
+names(data) |> grep(pattern = 'quality')
+# answer is 467
+names(data) |> grep(pattern = 'quality', value = TRUE)
+# answer is "Q173...How.would.you.rate.your.quality.of.life."
+```
+
+CREATING A FUNCTION <3
+note: curly brackets defines the functions code; this function reads in CSV files, will extract specific columns related to WHOQOL items plus some demo info, and renames the columns, and returns only the last row of data to use later (f i placeholder for filename) 
+```{r}
+readwhoqol <- function(f) {
+   d <- read.csv(f, skip = 1)
+   if(ncol(d) < 20) return(NULL) #a quick qc to ignore files with missing/incomplete data
+  dob <- names(d) |> grep(pattern = "birthday")
+  #d[dob] <- as.character(d[dob]) 
+  sex <- names(d) |> grep(pattern = "gender")
+  #d[sex] <- as.character(d[sex])
+  i <- names(d) |> grep(pattern = 'quality')
+  names(d)[i: (i+25)] <- paste('whoqol', 1:26, sep = '') #renaming columns to be whoqol1 to whoqol26
+  eyes <- c(i: (i+25), sex, dob) #columns of interest to extract from
+  whoqol <- d [, eyes] |> mutate(across(everything(), as.character))
+  whoqol$file <- f
+  return(whoqol[nrow(whoqol),])
+}
+
+allwhoqol <- lapply(all_csv, readwhoqol)
+whoqoldf <- bind_rows(allwhoqol)
+```
+
+THIS IS EXTRACTING DATE AND LUNDAID FROM THE FILE
+```{r}
+library(tidyr)
+x <- whoqoldf |> mutate(lunaid = basename(file)) |> separate(lunaid,c('lunaid', "visitdate"))
+```
+
+CREATING A NEW FUNCTION THAT USES case_when AND USE IT FOR ALL THE COLUMNS (whoqol1 to whoqol26), THERE IS A TEST CODE AT THE END OF THE CODE BLOCK 
+note: define ?as.factor and case_when, why are they important, especially for this? 
+```{r}
+whoqol_num <- function(x){
+  case_when(
+    x %in% c("Never", "Not at all", "Very dissatisfied", "Very poor", "1") ~ 1,
+    x %in% c("A little", "Dissatisfied", "Poor", "Slightly", "Seldom", "2") ~ 2,
+    x %in% c("Quite often", "Neither satisfied or dissatisfied", "Neither poor nor well", "Moderately", "A moderate amount", "Neither poor nor good", "3") ~ 3,
+    x %in% c("Very often", "Satisfied", "Well", "Mostly", "Very much", "Satisfied", "Good", "4") ~ 4,
+    x %in% c("Always", "Very satisfied", "Very good", "An extreme amount", "Extremely", "Completely", "Very well", "5") ~ 5
+  )
+}
+
+rbind( whoqoldf$whoqol26, whoqol_num(whoqoldf$whoqol26) ) 
+whoqol_num(whoqoldf$whoqol26)
+```
+SCORING THIS NOW?
+```{r}
+#creating a reverse scoring function for 1-5 scale 
+revscore <- function (x) {
+  return(6- as.numeric(as.character(x)))
+}
+
+whoqol_rev <- whoqoldf |> mutate(whoqol3 = revscore(whoqol3), whoqol4 = revscore(whoqol4), whoqol26 = revscore(whoqol26))
+
+## score data
+whoqol <- whoqol %>% 
+  mutate(D_1_Raw = whoqol3 + whoqoll4 + whoqol10 + whoqol15 + whoqol16 + whoqol17 + whoqol18) %>%
+  mutate(D_2_Raw = whoqol5 + whoqoll6 + whoqoll7 + whoqol11 + whoqol19 + whoqol26) %>%
+  mutate(D_3_Raw = whoqol20 + whoqol21 + whoqol22) %>%
+  mutate(D_4_Raw = whoqol8 + whoqoll9 + whoqol12 + whoqol13 + whoqol14 + whoqol23 + whoqol24 + whoqol25)
+```
+
+
+
+
