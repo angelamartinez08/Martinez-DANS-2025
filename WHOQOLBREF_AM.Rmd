@@ -3,7 +3,7 @@ title: "WHOQOLBREF LEARNING"
 output: html_document
 date: "2025-08-13"
 ---
-FIRST THINGS FIRST :P
+1) FIRST THINGS FIRST :P
 ```{r}
 setwd("/Volumes/Hera/Angela")
 load('/Volumes/Hera/Projects/7TBrainMech/scripts/behave/svys.RData')
@@ -19,7 +19,7 @@ all_csv <- Sys.glob('/Volumes/L/bea_res/Data/Temporary Raw Data/7T/*/*_selfrepor
 
 IN DIFFERENT BATTERIES THE WHOQOL QUESTIONS WILL BE IN A DIFFERENT POSITION SVY BATTERIES
 
-LOOK FOR WHOQOL ITEMS!!!
+2) LOOK FOR WHOQOL ITEMS!!!
 note: this is how we can look for specific items that we want to work within the data! 
 ```{r}
 names(data) |> grep(pattern = 'quality')
@@ -28,8 +28,8 @@ names(data) |> grep(pattern = 'quality', value = TRUE)
 # answer is "Q173...How.would.you.rate.your.quality.of.life."
 ```
 
-CREATING A FUNCTION <3
-note: curly brackets defines the functions code; this function reads in CSV files, will extract specific columns related to WHOQOL items plus some demo info, and renames the columns, and returns only the last row of data to use later (f i placeholder for filename) 
+3) CREATING A FUNCTION TO READ WHOQOL STUFF <3
+note: curly brackets defines the functions code; this function reads in CSV files, will extract specific columns related to WHOQOL items plus some demo info, and renames the columns, and returns only the last row of data to use later (f iS placeholder for filename) 
 ```{r}
 readwhoqol <- function(f) {
    d <- read.csv(f, skip = 1)
@@ -50,13 +50,26 @@ allwhoqol <- lapply(all_csv, readwhoqol)
 whoqoldf <- bind_rows(allwhoqol)
 ```
 
-THIS IS EXTRACTING DATE AND LUNDAID FROM THE FILE
+4) #HOMEWORK FILTER ROWS THAT HAVE TOO MANY NA (command to test this is.na) note: if_all function is checking that all of the columns satify the condition (not NA)
+```{r}
+#this is to filter rows that have no NAs in all 26 WHOQOL columns 
+x |> 
+  filter(if_all(whoqol1:whoqol26, ~ !is.na(.))) |> 
+  nrow()
+
+#this is to filter rows that have no NAs in at least one of the 26 WHOQOL columns 
+x |> 
+  filter(if_any(whoqol1:whoqol26, ~ !is.na(.))) |> 
+  nrow()
+```
+
+***5) EXTRACTING DATE AND LUNDAID FROM THE FILE, WHAT WILL BE THE FINAL N??? -- HOMEWORK: GROUP SUB DATA BY LUNAID
 ```{r}
 library(tidyr)
 x <- whoqoldf |> mutate(lunaid = basename(file)) |> separate(lunaid,c('lunaid', "visitdate"))
 ```
 
-CREATING A NEW FUNCTION THAT USES case_when AND USE IT FOR ALL THE COLUMNS (whoqol1 to whoqol26), THERE IS A TEST CODE AT THE END OF THE CODE BLOCK 
+6) CREATING A NEW FUNCTION THAT USES case_when AND USE IT FOR ALL THE COLUMNS (whoqol1 to whoqol26), THERE IS A TEST CODE AT THE END OF THE CODE BLOCK 
 note: define ?as.factor and case_when, why are they important, especially for this? 
 ```{r}
 whoqol_num <- function(x){
@@ -72,23 +85,38 @@ whoqol_num <- function(x){
 rbind( whoqoldf$whoqol26, whoqol_num(whoqoldf$whoqol26) ) 
 whoqol_num(whoqoldf$whoqol26)
 ```
-SCORING THIS NOW?
+
+7) SCORING THIS NOW!!!!!!!!!! LETSGOOOOO
 ```{r}
 #creating a reverse scoring function for 1-5 scale 
 revscore <- function (x) {
   return(6- as.numeric(as.character(x)))
 }
 
-whoqol_rev <- whoqoldf |> mutate(whoqol3 = revscore(whoqol3), whoqol4 = revscore(whoqol4), whoqol26 = revscore(whoqol26))
+### we want to reverse score whoqol3 (pain and discomfort), whoqol4(dependence on medicinal substances), and whoqol26(negative feelings) ###
 
-## score data
-whoqol <- whoqol %>% 
-  mutate(D_1_Raw = whoqol3 + whoqoll4 + whoqol10 + whoqol15 + whoqol16 + whoqol17 + whoqol18) %>%
-  mutate(D_2_Raw = whoqol5 + whoqoll6 + whoqoll7 + whoqol11 + whoqol19 + whoqol26) %>%
-  mutate(D_3_Raw = whoqol20 + whoqol21 + whoqol22) %>%
-  mutate(D_4_Raw = whoqol8 + whoqoll9 + whoqol12 + whoqol13 + whoqol14 + whoqol23 + whoqol24 + whoqol25)
+# Convert all whoqol columns from text to numeric (1–5)
+whoqoldf_num <- whoqoldf |> 
+  mutate(across(starts_with("whoqol"), whoqol_num))
+
+whoqoldf_num <- whoqoldf_num |>
+  mutate(
+    whoqol3 = revscore(whoqol3),
+    whoqol4 = revscore(whoqol4),
+    whoqol26 = revscore(whoqol26)
+  )
+
+## score data by domain yipiiii ## note: na.rm = TRUE Removes NA, then computes -- note: rowMeans(across(c(...) is used to compute the mean of several columns across each row
+whoqoldf_scored <- whoqoldf_num |> 
+  mutate(
+    D1_physical = rowMeans(across(c(whoqol3, whoqol4, whoqol10, whoqol15, whoqol16, whoqol17, whoqol18)), na.rm = TRUE),
+    D2_psych = rowMeans(across(c(whoqol5, whoqol6, whoqol7, whoqol11, whoqol19, whoqol26)), na.rm = TRUE),
+    D3_social = rowMeans(across(c(whoqol20, whoqol21, whoqol22)), na.rm = TRUE),
+    D4_env = rowMeans(across(c(whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25)), na.rm = TRUE)
+  )
+
+
 ```
-
 
 
 
