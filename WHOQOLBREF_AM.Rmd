@@ -51,6 +51,12 @@ whoqoldf <- bind_rows(allwhoqol)
 ```
 
 4) #HOMEWORK FILTER ROWS THAT HAVE TOO MANY NA (command to test this is.na) note: if_all function is checking that all of the columns satify the condition (not NA)
+
+WF Notes(20250827): 
+ * be sure to assign these outputs to another variable: `whoqoldf_nona <- whoqoldf |> filter(...)`
+ * `x` doesn't exist yet (created in the hunk below). want to pull that up first.
+ * `if_any !is.na` is probbly too generous and if_all too rigerous. maybe if_all on just a subset of columns? `whoqol1:whoqol26`
+
 ```{r}
 #this is to filter rows that have no NAs in all 26 WHOQOL columns 
 x |> 
@@ -98,6 +104,14 @@ revscore <- function (x) {
 # Convert all whoqol columns from text to numeric (1–5)
 whoqoldf_num <- whoqoldf |> 
   mutate(across(starts_with("whoqol"), whoqol_num))
+```
+
+
+WF Notes(20250827): 
+  * maybe save all revscored as new columns instead of overwriting the originals.  as e.g `whoqol3_rev` so we know where all the data comes and goes
+  * `rowMeans` with na.rm is great! I didn't know that could be used with across!
+
+```{r}
 
 whoqoldf_num <- whoqoldf_num |>
   mutate(
