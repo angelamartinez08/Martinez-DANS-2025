@@ -54,7 +54,7 @@ whoqoldf <- bind_rows(allwhoqol)
 ```{r}
 #this is to filter rows that have no NAs in all 26 WHOQOL columns 
 #creating a variable w complete_cases to establish new df that only contains rows where all items are filled in (no NA reponse)
-complete_cases <- x |> 
+complete_cases <- whoqoldf |> 
   filter(if_all(whoqol1:whoqol26, ~ !is.na(.)))
 
 #this is to filter rows that have no NAs in at least one of the 26 WHOQOL columns 
@@ -67,11 +67,11 @@ complete_cases <- x |>
 ```{r}
 #this step creates two new columns from og lunaid (99999_yyddmm)
 library(tidyr)
-x <- whoqoldf |> mutate(lunaid = basename(file)) |> separate(lunaid,c('lunaid', "visitdate")) 
+id_date <- whoqoldf |> mutate(lunaid = basename(file)) |> separate(lunaid,c('lunaid', "visitdate")) 
 
 #quick clean (all WHOQOL items are answered) removing NAs and empty strings
 #note: . != "" checks that the value is not an empty string
-clean <- x |> 
+clean <- id_date |> 
   filter(if_all(whoqol1:whoqol26, ~ !is.na(.) & . != ""))
 
 #grouping subject ID and count how many rows per sub ID, n_visit is a new column created
@@ -89,11 +89,11 @@ note: define ?as.factor and case_when, why are they important, especially for th
 ```{r}
 whoqol_num <- function(x){
   case_when(
-    x %in% c("Never", "Not at all", "Very dissatisfied", "Very poor", "1") ~ 1,
-    x %in% c("A little", "Dissatisfied", "Poor", "Slightly", "Seldom", "2") ~ 2,
-    x %in% c("Quite often", "Neither satisfied or dissatisfied", "Neither poor nor well", "Moderately", "A moderate amount", "Neither poor nor good", "3") ~ 3,
-    x %in% c("Very often", "Satisfied", "Well", "Mostly", "Very much", "Satisfied", "Good", "4") ~ 4,
-    x %in% c("Always", "Very satisfied", "Very good", "An extreme amount", "Extremely", "Completely", "Very well", "5") ~ 5
+    x %in% c("Never", "Not at all", "Very Dissatisfied", "Very dissatisfied", "Very poor", "Very Poor", "1") ~ 1,
+    x %in% c("A little", "A Little", "Dissatisfied", "Poor", "Slightly", "Seldom", "2") ~ 2,
+    x %in% c("Quite Often", "Quite often", "Neither Dissatisfied nor Satisfied", "Neither dissatisfied nor satisfied", "Neither Poor nor Well", "Neither poor nor well", "Moderately", "A moderate amount", "A Moderate Amount", "Neither Poor nor Good", "Neither poor nor good", "3") ~ 3,
+    x %in% c("Very often", "Very Often", "Satisfied", "Well", "Mostly", "Very much", "Very Much",  "Satisfied", "Good", "4") ~ 4,
+    x %in% c("Always", "Very Satisfied", "Very satisfied", "Very Good", "Very good", "An extreme amount", "An Extreme Amount", "Extremely", "Completely", "Very well", "Very Well", "5") ~ 5
   )
 }
 
@@ -111,27 +111,116 @@ revscore <- function (x) {
 ### we want to reverse score whoqol3 (pain and discomfort), whoqol4(dependence on medicinal substances), and whoqol26(negative feelings) ###
 
 # Convert all whoqol columns from text to numeric (1–5)
-whoqoldf_num <- whoqoldf |> 
+whoqoldf_scored <- clean |> 
   mutate(across(starts_with("whoqol"), whoqol_num))
 
-whoqoldf_num <- whoqoldf_num |>
+whoqoldf_scored <- whoqoldf_scored |>
   mutate(
-    whoqol3 = revscore(whoqol3),
-    whoqol4 = revscore(whoqol4),
-    whoqol26 = revscore(whoqol26)
+    whoqol3_rev = revscore(whoqol3),
+    whoqol4_rev = revscore(whoqol4),
+    whoqol26_rev = revscore(whoqol26)
   )
 
-## score data by domain yipiiii ## note: na.rm = TRUE Removes NA, then computes -- note: rowMeans(across(c(...) is used to compute the mean of several columns across each row
-whoqoldf_scored <- whoqoldf_num |> 
+#score data by domain based on manual yipiiii 
+#note: na.rm = TRUE Removes NA, telling R to ignore missing values when computing the mean
+#note: rowMeans(across(c(...) is used to compute the average across domain items. 
+whoqoldom_scored <- whoqoldf_scored |> 
   mutate(
-    D1_physical = rowMeans(across(c(whoqol3, whoqol4, whoqol10, whoqol15, whoqol16, whoqol17, whoqol18)), na.rm = TRUE),
-    D2_psych = rowMeans(across(c(whoqol5, whoqol6, whoqol7, whoqol11, whoqol19, whoqol26)), na.rm = TRUE),
-    D3_social = rowMeans(across(c(whoqol20, whoqol21, whoqol22)), na.rm = TRUE),
-    D4_env = rowMeans(across(c(whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25)), na.rm = TRUE)
+    D1_physical_raw = rowMeans(across(c(whoqol3_rev, whoqol4_rev, whoqol10, whoqol15, whoqol16, whoqol17, whoqol18)), na.rm = TRUE),
+    D2_psych_raw = rowMeans(across(c(whoqol5, whoqol6, whoqol7, whoqol11, whoqol19, whoqol26_rev)), na.rm = TRUE),
+    D3_social_raw = rowMeans(across(c(whoqol20, whoqol21, whoqol22)), na.rm = TRUE),
+    D4_env_raw = rowMeans(across(c(whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25)), na.rm = TRUE)
   )
+#based on the manual, we need to transform scores to 0-100 scale... create a function then create new df 
+#Transformed Score = (RawScore - 4) * (100/16)
+
+transform_whoqol <- function(x) {
+  (x - 4) * (100/16)
+}
+
+whoqoldom_transformed <- whoqoldom_scored |>
+  mutate(
+    D1_physical = transform_whoqol(D1_physical_raw), 
+    D2_psych = transform_whoqol(D2_psych_raw),
+    D3_social = transform_whoqol(D3_social_raw),
+    D4_env = transform_whoqol(D4_env_raw)
+  )
+```
+
+8) MAKING CUTE VISUALS
+```{r}
+library(ggplot2) #loading
+
+#convert to long format -- why? each variable is in its own row (ex: Domain and Score) -- ggplot2 requires long format for grouped plots! (e.g., boxplots, bar charts, line plots, etc.)
+#note: pivot_longer helps us do this 
+whoqol_long <- whoqoldom_transformed |>
+  select(lunaid, visitdate, D1_physical:D4_env) |> 
+  pivot_longer(cols = D1_physical:D4_env, names_to = "Domain", values_to = "Score")
+
+#line plot over time / domain trends
+ggplot(whoqol_long, aes(x = visitdate, y = Score, color = Domain, group = Domain)) + 
+  stat_summary(fun = mean, geom = "line", size = 1) +
+  stat_summary(fun = mean, geom = "point", size = 2) + 
+  labs(title = "WHOQOL DOMAIN SCORES OVER TIME",
+       x = "Time",
+       y = "Score") + 
+  theme_classic()
+
+#what about baseline vs most recent? 
+library(dplyr) #loading 
+
+#Baseline
+whoqol_baseline <- whoqoldom_transformed %>% 
+  group_by(lunaid) %>%
+  slice_min(visitdate, with_ties = FALSE) %>%
+  ungroup() %>%
+  rename_with(~paste0(.,"_baseline"), -lunaid)  # rename columns except lunaid
+
+#Recent
+whoqol_recent <- whoqoldom_transformed %>% 
+  group_by(lunaid) %>% 
+  slice_max(visitdate, with_ties = FALSE) %>% 
+  ungroup() %>% 
+  rename_with(~paste0(., "_recent"), -lunaid) 
+
+#joining baseline and most recent
+whoqol_compare <- whoqol_baseline %>%
+  inner_join(whoqol_recent, by = "lunaid")
+
+#calculating the difference between the two
+whoqol_diff <- whoqol_compare %>%
+  mutate(
+    change_physical = D1_physical_recent - D1_physical_baseline,
+    change_psych = D2_psych_recent - D2_psych_baseline, 
+    change_social = D3_social_recent - D3_social_baseline,
+    change_env = D4_env_recent - D4_env_baseline
+  )
+
+#running paired t-tests to see statistical comparisons
+t.test(whoqol_compare$D1_physical_recent, whoqol_compare$D1_physical_baseline, paired = TRUE)
+t.test(whoqol_compare$D2_psych_recent, whoqol_compare$D2_psych_baseline, paired = TRUE)
+t.test(whoqol_compare$D3_social_recent, whoqol_compare$D3_social_baseline, paired = TRUE)
+t.test(whoqol_compare$D4_env_recent, whoqol_compare$D4_env_baseline, paired = TRUE)
+
+#based on given data no stat. significance but still needs to be cleaned up, revisit. 
+
+#plotting the data
+plot_data <- whoqol_compare %>%
+  select(lunaid,
+         D1_physical_baseline, D1_physical_recent) %>%
+  pivot_longer(cols = -lunaid,
+               names_to = c("Domain", "Time"),
+               names_sep = "_",
+               values_to = "Score")
+
+ggplot(whoqol_long, aes(x = visitdate, y = Score, group = lunaid, color = Domain)) +
+  geom_line(alpha = 0.3) +
+  facet_wrap(~ Domain) +
+  labs(title = "Individual WHOQOL Scores Over Time",
+       x = "Time", y = "Score (0–100)") +
+  theme_minimal()
+
 
 
 ```
-
-
 
