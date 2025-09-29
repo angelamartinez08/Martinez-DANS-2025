@@ -156,6 +156,10 @@ whoqoldom_transformed <- whoqoldom_scored |>
 
 8) MERGING DATASETS & IDENTIFYING TIMEPOINTS & AGE GROUPS
 ```{r}
+#converting lunaids as characters
+whoqoldom_transformed$lunaid <- as.character(whoqoldom_transformed$lunaid)
+merg7T_raw$lunaid <- as.character(merg7T_raw$lunaid)
+
 whoqol_merge <- left_join(whoqoldom_transformed, merg7T_raw, by = "lunaid", "visitdate")
 #converting strings into date format 
 whoqol_merge$visitdate <- as.Date(as.character(whoqol_merge$visitdate), format = "%Y%m%d")
@@ -182,6 +186,13 @@ clean_distribution <- clean_visit %>%
   filter(!is.na(visitno)) %>%
   count(visitno, name = "n_subs")
 
+#renaming DOB columns
+clean_visit <- clean_visit %>% 
+  rename(dob1 = Welcome.to.the.LNCD.Survey.Battery....Your.birthday..MM.DD.YYYY..)
+
+clean_visit <- clean_visit %>%
+  rename(dob2 = Your.birthday..MM.DD.YYYY..)
+
 #AGE GROUPS: combining DOB columns, convert, calcualte age as of 
 clean_visit <- clean_visit %>% 
   mutate(dob_combined = coalesce(dob1, dob2)) %>%
@@ -191,7 +202,7 @@ clean_visit <- clean_visit %>%
 
 #reordering my columns so that these variables are at the front and everything else stays in current order
 clean_visit <- clean_visit %>%
-    select(lunaid, visitdate, behave.date, date_diff, visitno, age_behave, behave.age, age_combined, everything())
+    select(lunaid, visitdate, behave.date, date_diff, visitno, age_behave, behave.age, age_combined, dob1, dob2, everything())
 
 #creating integers for age_combined
 test <- clean_visit %>%
@@ -209,7 +220,11 @@ library(dplyr) #loading
 #note: pivot_longer helps us do this 
 whoqol_long <- clean_visit |>
   select(lunaid, visitno, age_combined, D1_physical:D4_env) |> 
-  pivot_longer(cols = D1_physical:D4_env, names_to = "Domain", values_to = "Score")
+  pivot_longer(cols = D1_physical:D4_env, names_to = "Domain", values_to = "Score") %>%
+  ### AGE GROUPS (HISTOGRAM) ###
+  mutate(age_group = cut(age_combined,
+                         breaks = c(0, 16, 20, 24, 33), 
+                         labels = c("10-15", "16-19", "20-23", "24-32")))
 
 ### DOMAIN TRENDS ACROSS TIMEPOINTS (LINE) ###
 ggplot(whoqol_long, aes(x = visitno, y = Score, color = Domain, group = interaction(Domain, age_group))) + 
@@ -220,12 +235,6 @@ ggplot(whoqol_long, aes(x = visitno, y = Score, color = Domain, group = interact
        x = "Time",
        y = "Score") + 
   theme_classic()
-
-### AGE GROUPS (HISTOGRAM) ###
-whoqol_long <- whoqol_long %>%
-  mutate(age_group = cut(age_combined,
-                         breaks = c(0, 16, 20, 24, 33), 
-                         labels = c("10-15", "16-19", "20-23", "24-32")))
 
 ggplot(whoqol_long, aes(x = Score, fill = age_group)) +
   geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
