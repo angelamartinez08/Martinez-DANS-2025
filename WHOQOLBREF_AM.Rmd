@@ -2,18 +2,25 @@
 title: "WHOQOLBREF LEARNING"
 output: html_document
 date: "2025-08-13"
+editor_options: 
+  chunk_output_type: console
 ---
 1) FIRST THINGS FIRST :P
 ```{r}
 setwd("/Volumes/Hera/Angela")
-load('/Volumes/Hera/Projects/7TBrainMech/scripts/behave/svys.RData')
+load('/Volumes/Hera/Projects/7TBrainMech/scripts/behave/svys.RData') #this is svys in data env.
+merg7T_raw <- read.csv("/Volumes/Hera/Projects/hippocampal_myelin/sample_info/merge_7t_04172025.csv")
 library(dplyr)
 ```
-RANDOM LOL REVISIT no need to look now
-```{r}
-Y2HF <- svys[["7T Y2 Hybrid Female Survey Battery"]] #EXTRACTING IT INTO DATAFRAME
 
-all_csv <- Sys.glob('/Volumes/L/bea_res/Data/Temporary Raw Data/7T/*/*_selfreport.csv') #finding where all those files are, the * is a placeholder(glob placeholder)
+1.5) SYS GLOB
+```{r}
+#Y2HF <- svys[["7T Y2 Hybrid Female Survey Battery"]] ## THIS IS JUST AN EXAMPLE ##
+
+# this will be named svys on under the environment data #
+#note: finding where all those files are, the * is a placeholder(glob placeholder)
+all_csv <- Sys.glob('/Volumes/L/bea_res/Data/Temporary Raw Data/7T/*/*_selfreport.csv') 
+
 
 ```
 
@@ -63,7 +70,7 @@ complete_cases <- whoqoldf |>
   #filter(if_any(whoqol1:whoqol26, ~ !is.na(.)))
 ```
 
-***5) EXTRACTING DATE AND LUNDAID FROM THE FILE, counting number of subs and visits per sub
+5) EXTRACTING DATE AND LUNDAID FROM THE FILE, counting number of subs and visits per sub
 ```{r}
 #this step creates two new columns from og lunaid (99999_yyddmm)
 library(tidyr)
@@ -126,10 +133,10 @@ whoqoldf_scored <- whoqoldf_scored |>
 #note: rowMeans(across(c(...) is used to compute the average across domain items. 
 whoqoldom_scored <- whoqoldf_scored |> 
   mutate(
-    D1_physical_raw = rowMeans(across(c(whoqol3_rev, whoqol4_rev, whoqol10, whoqol15, whoqol16, whoqol17, whoqol18)), na.rm = TRUE),
-    D2_psych_raw = rowMeans(across(c(whoqol5, whoqol6, whoqol7, whoqol11, whoqol19, whoqol26_rev)), na.rm = TRUE),
-    D3_social_raw = rowMeans(across(c(whoqol20, whoqol21, whoqol22)), na.rm = TRUE),
-    D4_env_raw = rowMeans(across(c(whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25)), na.rm = TRUE)
+    D1_physical_raw = rowMeans(across(c(whoqol3_rev, whoqol4_rev, whoqol10, whoqol15, whoqol16, whoqol17, whoqol18)), na.rm = TRUE)*4,
+    D2_psych_raw = rowMeans(across(c(whoqol5, whoqol6, whoqol7, whoqol11, whoqol19, whoqol26_rev)), na.rm = TRUE)*4,
+    D3_social_raw = rowMeans(across(c(whoqol20, whoqol21, whoqol22)), na.rm = TRUE)*4,
+    D4_env_raw = rowMeans(across(c(whoqol8, whoqol9, whoqol12, whoqol13, whoqol14, whoqol23, whoqol24, whoqol25)), na.rm = TRUE)*4
   )
 #based on the manual, we need to transform scores to 0-100 scale... create a function then create new df 
 #Transformed Score = (RawScore - 4) * (100/16)
@@ -147,80 +154,149 @@ whoqoldom_transformed <- whoqoldom_scored |>
   )
 ```
 
-8) MAKING CUTE VISUALS
+8) MERGING DATASETS & IDENTIFYING TIMEPOINTS & AGE GROUPS
+```{r}
+whoqol_merge <- left_join(whoqoldom_transformed, merg7T_raw, by = "lunaid", "visitdate")
+#converting strings into date format 
+whoqol_merge$visitdate <- as.Date(as.character(whoqol_merge$visitdate), format = "%Y%m%d")
+whoqol_merge$behave.date <- as.Date(as.character(whoqol_merge$behave.date), format = "%Y%m%d")
+
+#calculating the difference in days
+whoqol_merge <- whoqol_merge %>%
+  mutate(date_diff = abs(as.numeric(visitdate - behave.date)))
+#assigning closest behavioral visit and its visit.no
+closest_visit <- whoqol_merge %>%
+  group_by(lunaid, visitdate) %>%
+  slice_min(order_by = date_diff, n = 1) %>% #selecting rows with the smallest value and take only one single close match (n=1) 
+  ungroup()
+
+#removing any duplicated survey responses, only keeping the closest 
+clean_visit <- closest_visit %>% 
+  group_by(lunaid, visitno) %>%
+  filter(!is.na(visitno)) %>%
+  slice_min(order_by = date_diff, n = 1) %>% 
+  ungroup()
+
+#recounting distribution
+clean_distribution <- clean_visit %>%
+  filter(!is.na(visitno)) %>%
+  count(visitno, name = "n_subs")
+
+#AGE GROUPS: combining DOB columns, convert, calcualte age as of 
+clean_visit <- clean_visit %>% 
+  mutate(dob_combined = coalesce(dob1, dob2)) %>%
+  mutate(dob_combined = as.Date(dob_combined, format = "%m/%d/%Y")) %>%
+  mutate(age_behave = as.numeric(difftime(visitdate, dob_combined, units = "weeks")) / 52.25) %>%
+  mutate(age_combined = coalesce(behave.age, age_behave))
+
+#reordering my columns so that these variables are at the front and everything else stays in current order
+clean_visit <- clean_visit %>%
+    select(lunaid, visitdate, behave.date, date_diff, visitno, age_behave, behave.age, age_combined, everything())
+
+#creating integers for age_combined
+test <- clean_visit %>%
+  mutate(age_combined = as.integer(age_combined)) %>%
+  filter(!(age_combined %in% c(2000, 2007)))  #some funny ages that were 2000 and 2007, excluding
+
+```
+
+9) HISTOGRAMS AND LINE GRAPHS 
 ```{r}
 library(ggplot2) #loading
+library(dplyr) #loading 
 
 #convert to long format -- why? each variable is in its own row (ex: Domain and Score) -- ggplot2 requires long format for grouped plots! (e.g., boxplots, bar charts, line plots, etc.)
 #note: pivot_longer helps us do this 
-whoqol_long <- whoqoldom_transformed |>
-  select(lunaid, visitdate, D1_physical:D4_env) |> 
+whoqol_long <- clean_visit |>
+  select(lunaid, visitno, age_combined, D1_physical:D4_env) |> 
   pivot_longer(cols = D1_physical:D4_env, names_to = "Domain", values_to = "Score")
 
-#line plot over time / domain trends
-ggplot(whoqol_long, aes(x = visitdate, y = Score, color = Domain, group = Domain)) + 
-  stat_summary(fun = mean, geom = "line", size = 1) +
+### DOMAIN TRENDS ACROSS TIMEPOINTS (LINE) ###
+ggplot(whoqol_long, aes(x = visitno, y = Score, color = Domain, group = interaction(Domain, age_group))) + 
+  stat_summary(fun = mean, geom = "line", linewidth = 1) +
   stat_summary(fun = mean, geom = "point", size = 2) + 
+  facet_wrap(~ age_group) +
   labs(title = "WHOQOL DOMAIN SCORES OVER TIME",
        x = "Time",
        y = "Score") + 
   theme_classic()
 
-#what about baseline vs most recent? 
-library(dplyr) #loading 
+### AGE GROUPS (HISTOGRAM) ###
+whoqol_long <- whoqol_long %>%
+  mutate(age_group = cut(age_combined,
+                         breaks = c(0, 16, 20, 24, 33), 
+                         labels = c("10-15", "16-19", "20-23", "24-32")))
 
-#Baseline
-whoqol_baseline <- whoqoldom_transformed %>% 
-  group_by(lunaid) %>%
-  slice_min(visitdate, with_ties = FALSE) %>%
-  ungroup() %>%
-  rename_with(~paste0(.,"_baseline"), -lunaid)  # rename columns except lunaid
-
-#Recent
-whoqol_recent <- whoqoldom_transformed %>% 
-  group_by(lunaid) %>% 
-  slice_max(visitdate, with_ties = FALSE) %>% 
-  ungroup() %>% 
-  rename_with(~paste0(., "_recent"), -lunaid) 
-
-#joining baseline and most recent
-whoqol_compare <- whoqol_baseline %>%
-  inner_join(whoqol_recent, by = "lunaid")
-
-#calculating the difference between the two
-whoqol_diff <- whoqol_compare %>%
-  mutate(
-    change_physical = D1_physical_recent - D1_physical_baseline,
-    change_psych = D2_psych_recent - D2_psych_baseline, 
-    change_social = D3_social_recent - D3_social_baseline,
-    change_env = D4_env_recent - D4_env_baseline
-  )
-
-#running paired t-tests to see statistical comparisons
-t.test(whoqol_compare$D1_physical_recent, whoqol_compare$D1_physical_baseline, paired = TRUE)
-t.test(whoqol_compare$D2_psych_recent, whoqol_compare$D2_psych_baseline, paired = TRUE)
-t.test(whoqol_compare$D3_social_recent, whoqol_compare$D3_social_baseline, paired = TRUE)
-t.test(whoqol_compare$D4_env_recent, whoqol_compare$D4_env_baseline, paired = TRUE)
-
-#based on given data no stat. significance but still needs to be cleaned up, revisit. 
-
-#plotting the data
-plot_data <- whoqol_compare %>%
-  select(lunaid,
-         D1_physical_baseline, D1_physical_recent) %>%
-  pivot_longer(cols = -lunaid,
-               names_to = c("Domain", "Time"),
-               names_sep = "_",
-               values_to = "Score")
-
-ggplot(whoqol_long, aes(x = visitdate, y = Score, group = lunaid, color = Domain)) +
-  geom_line(alpha = 0.3) +
-  facet_wrap(~ Domain) +
-  labs(title = "Individual WHOQOL Scores Over Time",
-       x = "Time", y = "Score (0–100)") +
+ggplot(whoqol_long, aes(x = Score, fill = age_group)) +
+  geom_histogram(position = "identity", alpha = 0.6, bins = 30) +
+  facet_wrap(~ Domain, scales = "free") +
+  labs(title = "WHOQOL Domain Scores by Age Group",
+       x = "Domain Score",
+       y = "Count") +
   theme_minimal()
 
 
+### BASELINE (BOXPLOT) ###
+#note: for each lunaid group this selects rows with min visitdate
+#note: with_ties = FALSE means if multiple rows share the exame same earliest visitdate, to only pick one row so there are no duplicates. 
+whoqol_baseline <- clean_visit %>% 
+  group_by(lunaid) %>%
+  slice_min(visitno, with_ties = FALSE) %>% 
+  rename_with(~paste0(.,"_baseline"), -lunaid)  # rename columns except lunaid
 
+whoqol_baseline_long <- whoqol_baseline %>% pivot_longer( cols = D1_physical_baseline:D4_env_baseline, names_to = "Domain", values_to = "Score")
+
+print(
+  ggplot(whoqol_baseline_long, aes(x = Domain, y = Score, fill = Domain)) + 
+  geom_boxplot() +
+  labs(title = "Baseline WHOQOL Scores by Domain") +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+)
+```
+
+10) RUNNING SOME TESTS 
+- Linear Regression Model
+```{r}
+#LINEAR REGRESSION MODEL - How does age predict different WHOQOL-BREF domains? 
+#note: model <- lm(outcome ~ x + y, data = your_dataframe)
+
+model_physical <- lm(D1_physical ~ age_combined, data = test)
+summary(model_physical)
+
+model_psych <- lm(D2_psych ~ age_combined, data = test) 
+summary(model_psych)
+
+model_social <- lm(D3_social ~ age_combined, data = test) 
+summary(model_social)
+
+model_env <- lm(D4_env ~ age_combined, data = test)
+summary(model_env)
+
+model_all <- lm(cbind(D1_physical, D2_psych, D3_social, D4_env) ~ age_combined, data = test)
+summary(model_all)
+
+#visualize Linear Regression Models 
+library(ggplot2)
+
+ggplot(test, aes(x = age_combined, y = D1_physical)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Age effect on Physical Domain", x = "Age", y = "Physical Domain Score")
+
+ggplot(test, aes(x = age_combined, y = D2_psych)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Age effect on Psych Domain", x = "Age", y = "Psych Domain Score")
+
+ggplot(test, aes(x = age_combined, y = D3_social)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Age effect on Social Domain", x = "Age", y = "Social Domain Score")
+
+ggplot(test, aes(x = age_combined, y = D4_env)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(title = "Age effect on Environment Domain", x = "Age", y = "Environment Domain Score")
 ```
 
