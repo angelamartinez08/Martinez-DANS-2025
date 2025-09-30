@@ -1,0 +1,146 @@
+---
+title: "DTS"
+output: html_document
+date: "2025-09-29"
+---
+first things first <3
+```{r}
+setwd("/Volumes/Hera/Angela")
+library(dplyr)
+library(tidyr)
+```
+
+NOTES:
+DISTRESS TOLERANCE SCALE - 15-item self-report measure of emotional distress
+ITEM CODING - Individuals select on a 1-5 Likert Scale -- (Strongly Disagree, Mildly Disagree, Feel Neutral, Mildly Agree, Strongly Agree)
+REVERSE CODING - There is one total scale and only ITEM 6 is reverse coded
+
+1)GRABBING THE DATA AND MAKING IT EASY TO READ
+```{r}
+dts <- read.csv('/Volumes/Hera/Projects/7TBrainMech/scripts/behave/txt/dts.csv')
+
+### RENAMING THE COLUMNS TO BE dts1, dts2, ..., dts15 ###
+# note: this function renames the columns selected (1-15) #
+names(dts)[1:15] <- paste0("dts", 1:15) 
+
+### SEPERATING LUNAID AND VISIT DATE (TWO SEPARATE COLUMNS) ###
+# was originally 99999_YYYYMMDD # also ld8 was the orignical column name #
+dts <- dts %>%
+  separate(ld8, into = c("lunaid", "visitdate"), sep = "_")
+  
+dts <- dts %>%
+  mutate(visitdate = as.Date(visitdate, format = "%Y%m%d")) # converting string into date object #
+```
+
+2) CREATING A FUNCTION THAT CONVERTS TO 1-5 LIKERT -- TEST CODE AT THE END OF THE CODE BLOCK --
+```{r}
+dts_num <- function(x){
+  x <- as.character(x)
+  case_when(
+    x %in% c("Strongly disagree", "1") ~ 1,
+    x %in% c("Mildly disagree", "2") ~ 2,
+    x %in% c("Equally agree and disagree", "3") ~ 3,
+    x %in% c("Mildly agree", "4") ~ 4,
+    x %in% c("Strongly agree", "5") ~ 5
+  )
+}
+#applying the created function across every column from dts1 to dts15
+dts <- dts %>%
+  mutate(across(dts1:dts15, dts_num))
+
+rbind(dts$dts15, dts_num(dts$dts15))  #test code - combines two vectors and prints
+dts_num(dts$dts15) #test code - prints the converted vector
+```
+
+4)FILTERING N/As (new dataframe)
+```{r}
+### FILTER ROWS THAT HAVE TOO MANY NA ### 
+# creating a variable w complete_cases to establish new df that only contains rows where all items are filled in (no NA responses) #
+dts_new <- dts |> 
+  filter(if_all(dts1:dts15, ~ !is.na(.)))
+```
+
+5)SCORING!
+```{r}
+### INSTRUCTIONS ###
+# Raw data items coded 1-5 (with high anchor of very true of me) #
+# scales scored so that high scores represent great tolerance #
+# THERE ARE FOUR DIFFERENT SUBSCALES: TOLERANCE, ABSORPTION, APPRAISAL, REGULATION # 
+# SIMONS & GAHER (2005) --> "Scoring: Item 6 is reverse scored. Subscale scores are the mean of the items.The higher-order DTS is formed from the mean of the four subscales."
+
+### | Subscale   | Items                                      |
+--------------------------------------------------------------
+### | Tolerance  | dts1, dts3, dts5                           |
+### | Appraisal  | dts2, dts4, dts15                          |
+### | Absorption | **dts6**, dts7, dts9, dts10, dts11, dts12  |
+### | Regulation | dts8, dts13, dts14                         | 
+
+### REVERSE SCORING ITEM 6 - FUNCTION ###
+reverse_score <- function(x, maxscore = 5) {
+  return(maxscore + 1 -x )
+} # if they answered 1 then it'll reverse to 5, 2 to 4, 3 stays same, 4 to 2, and 5 to 1 # 
+
+dts_new <- dts_new %>%
+  mutate(
+    dts6_rev = reverse_score(dts6))
+
+### SCORING SUBSCALES ###
+dts_new <- dts_new %>%
+  mutate(
+    DTS_Tolerance = rowMeans(select(., dts1, dts3, dts5), na.rm = TRUE),
+    DTS_Appraise = rowMeans(select(., dts2, dts4, dts15 ), na.rm = TRUE),
+    DTS_Absorb = rowMeans(select(., dts6_rev, dts7, dts9, dts10, dts11, dts12), na.rm = TRUE),
+    DTS_Regulate = rowMeans(select(., dts8, dts13, dts14), na.rm = TRUE)
+  )
+
+### SCORING TOTAL DTS ###
+dts_new <- dts_new %>%
+  mutate(
+    DTS_Total = rowMeans(select(., DTS_Tolerance, DTS_Appraise, DTS_Absorb, DTS_Regulate), na.rm = TRUE))
+
+```
+
+6) MERGING DATASETS & IDENTIFYING TIMEPOINTS & AGE GROUPS
+```{r}
+
+# first, convert lunaids as characters for consistency
+dts_new$lunaid <- as.character(dts_new$lunaid)
+merg7T_raw$lunaid <- as.character(merg7T_raw$lunaid)
+
+### WELCOME merg7T_raw VIA LEFTJOIN ###
+dts_new2 <- left_join(dts_new, merg7T_raw, by = "lunaid", "visitdate")
+
+#converting strings into date format again 
+dts_new2$behave.date <- as.Date(as.character(dts_new2$behave.date), format = "%Y%m%d")
+
+#calculating the difference in days
+dts_new2 <- dts_new2 %>%
+  mutate(date_diff = abs(as.numeric(visitdate - behave.date)))
+
+#assigning closest behavioral visit and its visit.no
+dts_new3 <- dts_new2 %>%
+  group_by(lunaid, visitdate) %>%
+  slice_min(order_by = date_diff, n = 1) %>% #selecting rows with the smallest value and take only one single close match (n=1) 
+  ungroup()
+
+#removing any duplicated survey responses, only keeping the closest 
+dts_new3 <- dts_new3 %>% 
+  group_by(lunaid, visitno) %>%
+  filter(!is.na(visitno)) %>%
+  slice_min(order_by = date_diff, n = 1) %>% 
+  ungroup()
+
+#recounting distribution
+dts_distribution <- dts_new3 %>%
+  filter(!is.na(visitno)) %>%
+  count(visitno, name = "n_subs")
+
+#reordering columns
+dts_new3 <- dts_new3 %>%
+    select(lunaid, visitdate, behave.date, date_diff, visitno, behave.age, everything())
+
+```
+
+THE END
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
